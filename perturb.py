@@ -1,17 +1,40 @@
+'''
+Author: Ayrton San Joaquin
+February 2021
+'''
+
 import torch
-from torchvision import models, transforms
+import torch.nn.functional as F
+
 import cv2
-import sys
+from PIL import Image
+import matplotlib.pyplot as plt
+
+import os
+from os.path import join
 import numpy as np
 from tqdm import tqdm
 
+device = ('cuda:0' if torch.cuda.is_available() else 'cpu')
+
 def tv_norm(input, tv_beta):
+    '''
+    Computes the Total Variation (TV) denoising term
+    Parameters: input image, tv_beta
+    Returns: TV term
+    '''
     img = input[0, 0, :]
     row_grad = torch.mean(torch.abs((img[:-1 , :] - img[1 :, :])).pow(tv_beta))
     col_grad = torch.mean(torch.abs((img[: , :-1] - img[: , 1 :])).pow(tv_beta))
     return row_grad + col_grad
 
-def save(mask, img, blurred):
+def save(mask, img, blurred, out, plot=True):
+    '''
+    Creates, saves, and optionally, plots the images
+    Parameters: Mask, original image, blurred image, output directory
+    plot - plot the image
+    Returns: void
+    '''
     mask = mask.cpu().data.numpy()[0]
     mask = np.transpose(mask, (1, 2, 0))
 
@@ -20,70 +43,119 @@ def save(mask, img, blurred):
     heatmap = cv2.applyColorMap(np.uint8(255*mask), cv2.COLORMAP_JET)
     
     heatmap = np.float32(heatmap) / 255
-    cam = 1.0*heatmap + np.float32(img)/255
+    cam = 1.0 * heatmap + np.float32(img) / 255
     cam = cam / np.max(cam)
 
     img = np.float32(img) / 255
-    perturbated = np.multiply(1 - mask, img) + np.multiply(mask, blurred)	
+    perturbed = np.multiply(1 - mask, img) + np.multiply(mask, blurred)	
 
-    cv2.imwrite("perturbated.png", np.uint8(255*perturbated))
-    cv2.imwrite("heatmap.png", np.uint8(255*heatmap))
-    cv2.imwrite("mask.png", np.uint8(255*mask))
-    cv2.imwrite("cam.png", np.uint8(255*cam))
+    perturbed = Image.fromarray(np.uint8(255 * perturbed))
+    perturbed.save(join(out,'perturbed.png'))
 
-def perturb(image, model, transforms, device='gpu', \
-    tv_beta=3, lr=0.1, max_iter=500, l1_coeff=0.01, tv_coeff=0.2):
-    original_img = cv2.imread(image)
-    original_img = cv2.resize(original_img, (224, 224))
-    img = np.float32(original_img) / 255
-    blurred_img1 = cv2.GaussianBlur(img, (11, 11), 5)
-    blurred_img2 = np.float32(cv2.medianBlur(original_img, 11))/255
-    blurred_img_numpy = (blurred_img1 + blurred_img2) / 2
-    mask = torch.ones((28, 28), dtype = torch.float32).unsqueeze(0).unsqueeze(0)
+    heatmap = Image.fromarray(np.uint8(255 * heatmap))
+    heatmap.save(join(out,'heatmap.png'))
+    
+    # squeeze because grayscale image (1 color channel)
+    mask = Image.fromarray(np.squeeze(np.uint8(255 * mask), axis=2))
+    mask.save(join(out,'mask.png'))
 
-    img = transforms(img).unsqueeze(0)
-    blurred = transforms(blurred_img2)
+    cam = Image.fromarray(np.uint8(255 * cam))
+    cam.save(join(out,'cam.png'))
 
-    if (device == 'cpu'):
-        upsample = torch.nn.UpsamplingBilinear2d(size=(224, 224))
+    # Plot images
+    if plot:
+      plt.figure()
+
+      plt.subplot(131)
+      plt.title('Original')
+      plt.imshow(img * 255)
+      plt.axis('off')
+
+      plt.subplot(132)
+      plt.title('Mask')
+      plt.imshow(np.uint8(255 * mask))
+      plt.axis('off')
+
+      plt.subplot(133)
+      plt.title('Perturbed Image')
+      plt.imshow(np.uint8(255 * perturbed))
+      plt.axis('off')
+
+      plt.tight_layout()
+      plt.show()
+
+
+def upsample(image):
+    return F.interpolate(image, size=(224, 224), mode='bilinear', align_corners=False).to(device)
+
+def perturb(image, model, transforms, out_dir='/content/perturb_outputs', \
+    tv_beta=3, lr=0.1, max_iter=100, l1_coeff=0.01, tv_coeff=0.02, is_numpy=False):
+    '''
+    Computes the mask via Stochastic Gradient Descent (SGD) and 
+    applies perturbation onto Image as described by 
+    Meaningful Perturbations (2018)
+
+    Parameters:
+    image - image to perturb
+    model - Black-box model to be used
+    transforms - affine transformations to preprocess the image
+    out_dir - output directory where the resulting images will be saved
+    tv_beta - degree of the Total Variation denoising norm
+    lr - learning rate
+    max_iter - the number of iterations for SGD
+    l1_coeff - L1 regularization coefficient
+    tv_coeff - TV coefficient (Lambda_2 in the paper)
+    is_numpy - whether the image passed is already a numpy array
+
+    Returns: void (calls the save function to create and save the resulting images)
+    '''
+  
+    if is_numpy:
+      original_img = image
     else:
-        upsample = torch.nn.UpsamplingBilinear2d(size=(224, 224)).cuda()
+      original_img = np.array(Image.open(image).convert('RGB').resize((224, 224)))
+
+    blurred_img = cv2.GaussianBlur(original_img, (11, 11), 5)
+    # generate mask
+    # Sample from U[0,1)
+    mask = torch.ones((1, 1, 28, 28), dtype = torch.float32, requires_grad=True, device=device)
+
+    # image tensor
+    img_tensor = transforms(original_img).unsqueeze(0).to(device)
+    blurred_tensor = transforms(blurred_img).to(device)
+
     optimizer = torch.optim.Adam([mask], lr=lr)
 
-    target = torch.nn.Softmax(dim=1)(model(img))  # debug
-    category = np.argmax(target.cpu().data.numpy())
-    print( "Category with highest probability: ", category)
+    prob = torch.nn.Softmax(dim=1)(model(img_tensor))
+    class_idx = np.argmax(prob.cpu().data.numpy())
+    print( "Predicted class index: {}. Probability before perturbation: {}".format(class_idx, prob[0, class_idx]))
 
-    for i in tqdm(range(max_iter)):
-        #print(mask.shape)
+    for i in range(max_iter):
         upsampled_mask = upsample(mask)
-        # The single channel mask is used with an RGB image, 
-        # so the mask is duplicated to have 3 channel,
-        upsampled_mask = \
-            upsampled_mask.expand(1, 3, upsampled_mask.size(2), \
-                                        upsampled_mask.size(3))
         
-        # Use the mask to perturbated the input image.
-        perturbated_input = img.mul(upsampled_mask) + \
-                            blurred.mul(1-upsampled_mask)
+        # Use the mask to perturbe the image
+        perturbed_input = img_tensor.mul(upsampled_mask) + \
+                            blurred_tensor.mul(1-upsampled_mask)
         
-        noise = np.zeros((224, 224, 3), dtype = np.float32)
-        cv2.randn(noise, 0, 0.2)
-        noise = np.transpose(noise, (2, 0, 1))
-        noise = torch.from_numpy(noise).unsqueeze(0)  # debug
-        #print(noise.shape)
-        perturbated_input = perturbated_input + noise
+        # add some noise to the perturbed image for the model to learn from multiple masks
+        noise = (torch.randn((1, 3, 224, 224), device=device))
+        perturbed_input = perturbed_input + noise
         
-        outputs = torch.nn.Softmax(dim=1)(model(perturbated_input))  # debug
-        loss = l1_coeff*torch.mean(torch.abs(1 - mask)) + \
-                tv_coeff*tv_norm(mask, tv_beta) + outputs[0, category]
+        masked_idx = torch.nn.Softmax(dim=1)(model(perturbed_input))
+        masked_prob = masked_idx[0, class_idx]
+
+        loss = l1_coeff * torch.mean(torch.abs(1 - mask)) + \
+                tv_coeff * tv_norm(mask, tv_beta) + masked_prob
 
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
 
-        # Optional: clamping seems to give better results
         mask.data.clamp_(0, 1)
+        if i% 20 == 0:
+            print('Loss: {}, Probability for target class {}'.format(loss, masked_prob))
+    # Create directory
+    if not os.path.exists(out_dir):
+      os.mkdir(out_dir)
 
-    upsampled_mask = upsample(mask)
-    save(upsampled_mask, original_img, blurred_img_numpy)
+    save(upsample(mask), original_img, blurred_img, out_dir)
