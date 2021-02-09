@@ -6,7 +6,7 @@ import cv2
 import matplotlib.pyplot as plt
 
 import os
-from os.path import join
+from os.path import join, basename, splitext
 import numpy as np
 from tqdm import tqdm
 
@@ -21,7 +21,7 @@ def tv_norm(input, tv_beta):
     col_grad = torch.mean(torch.abs((img[: , :-1] - img[: , 1 :])).pow(tv_beta))
     return row_grad + col_grad
 
-def save(mask, img, blurred, out, plot=True):
+def save(mask, img, blurred, out, filename, plot=True):
     '''
     Creates, saves, and optionally, plots the images
     '''
@@ -33,26 +33,26 @@ def save(mask, img, blurred, out, plot=True):
     heatmap = cv2.applyColorMap(np.uint8(255*mask), cv2.COLORMAP_JET)
     
     heatmap = np.float32(heatmap) / 255
+    heatmap = cv2.cvtColor(heatmap, cv2.COLOR_BGR2RGB)
     cam = 1.0 * heatmap + np.float32(img) / 255
     cam = cam / np.max(cam)
 
     img = np.float32(img) / 255
-    perturbed = np.multiply(1 - mask, img) + np.multiply(mask, blurred)	
+    perturbed = np.multiply(1 - mask, img) + np.multiply(mask, blurred)
 
     perturbed_img = Image.fromarray(np.uint8(255 * perturbed))
-    perturbed_img.save(join(out,'perturbed.png'))
+    perturbed_img.save(join(out, filename + 'perturbed.png'))
 
-    heatmap = cv2.cvtColor(heatmap, cv2.COLOR_BGR2RGB)
     heatmap_img = Image.fromarray(np.uint8(255 * heatmap))
-    heatmap_img.save(join(out,'heatmap.png'))
+    heatmap_img.save(join(out, filename + 'heatmap.png'))
     
     # squeeze because grayscale image (1 color channel)
     mask = np.squeeze(np.uint8(255 * mask), axis=2)
     mask_img = Image.fromarray(mask)
-    mask_img.save(join(out,'mask.png'))
+    mask_img.save(join(out, filename + 'mask.png'))
 
     cam = Image.fromarray(np.uint8(255 * cam))
-    cam.save(join(out,'cam.png'))
+    cam.save(join(out, filename + 'cam.png'))
 
     # Plot images
     if plot:
@@ -81,7 +81,7 @@ def upsample(image):
     return F.interpolate(image, size=(224, 224), mode='bilinear', align_corners=False).to(device)
 
 def perturb(image, model, transforms, out_dir='/content/perturb_outputs', \
-    tv_beta=3, lr=0.1, max_iter=100, l1_coeff=0.01, tv_coeff=0.02, \
+    tv_beta=3, lr=0.2, max_iter=100, l1_coeff=0.01, tv_coeff=0.02, \
     is_numpy=False, plot=True):
     '''
     Computes the mask via Stochastic Gradient Descent (SGD) and 
@@ -108,6 +108,7 @@ def perturb(image, model, transforms, out_dir='/content/perturb_outputs', \
       original_img = image
     else:
       original_img = np.array(Image.open(image).convert('RGB').resize((224, 224)))
+      filename = splitext(basename(image))[0]
 
     blurred_img = cv2.GaussianBlur(np.float32(original_img / 255), (11, 11), 5)
     # generate mask
@@ -126,15 +127,15 @@ def perturb(image, model, transforms, out_dir='/content/perturb_outputs', \
         upsampled_mask = upsample(mask)
         
         # perturb the image with mask
-        perturbated_input = img_tensor.mul(upsampled_mask) + \
+        perturbed_input = img_tensor.mul(upsampled_mask) + \
                             blurred_tensor.mul(1-upsampled_mask)
         
         # add some noise to the perturbed image for the model to learn from multiple masks
         noise = (torch.randn((1, 3, 224, 224), device=device))
-        perturbated_input = perturbated_input + noise
+        perturbed_input = perturbed_input + noise
         
         
-        masked_idx = torch.nn.Softmax(dim=1)(model(perturbated_input))
+        masked_idx = torch.nn.Softmax(dim=1)(model(perturbed_input))
         masked_prob = masked_idx[0, class_idx]
 
         loss = l1_coeff * torch.mean(torch.abs(1 - mask)) + \
@@ -146,8 +147,8 @@ def perturb(image, model, transforms, out_dir='/content/perturb_outputs', \
 
         mask.data.clamp_(0, 1)
         if i% 20 == 0:
-            print('Loss: {}, Probability for target class {}'.format(loss, masked_prob))
+            print('Loss: {}, Probability for target class {}, Predicted label{}'.format(loss, masked_prob)
     
     if not os.path.exists(out_dir):
       os.mkdir(out_dir)
-    save(upsample(mask), original_img, blurred_img, out_dir, plot)
+    save(upsample(mask), original_img, blurred_img, out_dir, filename, plot)
