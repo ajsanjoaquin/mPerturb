@@ -82,7 +82,7 @@ def upsample(image):
 
 def perturb(image, model, transforms, out_dir='/content/perturb_outputs', \
     tv_beta=3, lr=0.2, max_iter=100, l1_coeff=0.01, tv_coeff=0.02, \
-    is_numpy=False, plot=True):
+    plot=True):
     '''
     Computes the mask via Stochastic Gradient Descent (SGD) and 
     applies perturbation onto Image as described by 
@@ -98,17 +98,12 @@ def perturb(image, model, transforms, out_dir='/content/perturb_outputs', \
     max_iter - the number of iterations for SGD
     l1_coeff - L1 regularization coefficient
     tv_coeff - TV coefficient (Lambda_2 in the paper)
-    is_numpy - whether the image passed is already a numpy array
     plot - plot images
 
     Returns: void (calls the save function to create and save the resulting images)
     '''
-  
-    if is_numpy:
-      original_img = image
-    else:
-      original_img = np.array(Image.open(image).convert('RGB').resize((224, 224)))
-      filename = splitext(basename(image))[0]
+    original_img = np.array(Image.open(image).convert('RGB').resize((224, 224)))
+    filename = splitext(basename(image))[0]
 
     blurred_img = cv2.GaussianBlur(np.float32(original_img / 255), (11, 11), 5)
     # generate mask
