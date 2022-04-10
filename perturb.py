@@ -56,25 +56,25 @@ def save(mask, img, blurred, out, filename, plot=True):
 
     # Plot images
     if plot:
-      plt.figure()
+        plt.figure()
 
-      plt.subplot(131)
-      plt.title('Original')
-      plt.imshow(np.uint8(img * 255))
-      plt.axis('off')
+        plt.subplot(131)
+        plt.title('Original')
+        plt.imshow(np.uint8(img * 255))
+        plt.axis('off')
 
-      plt.subplot(132)
-      plt.title('Mask')
-      plt.imshow(mask, cmap='gray')
-      plt.axis('off')
+        plt.subplot(132)
+        plt.title('Mask')
+        plt.imshow(mask, cmap='gray')
+        plt.axis('off')
 
-      plt.subplot(133)
-      plt.title('Perturbed Image')
-      plt.imshow(np.uint8(255 * perturbed))
-      plt.axis('off')
+        plt.subplot(133)
+        plt.title('Perturbed Image')
+        plt.imshow(np.uint8(255 * perturbed))
+        plt.axis('off')
 
-      plt.tight_layout()
-      plt.show()
+        plt.tight_layout()
+        plt.show()
 
 
 def upsample(image):
@@ -142,8 +142,8 @@ def perturb(image, model, transforms, out_dir='/content/perturb_outputs', \
 
         mask.data.clamp_(0, 1)
         if i% 20 == 0:
-            print('Loss: {}, Probability for target class {}, Predicted label{}'.format(loss, masked_prob)
+            print('Loss: {}, Probability for target class {}, Predicted label{}'.format(loss, masked_prob, class_idx))
     
     if not os.path.exists(out_dir):
-      os.mkdir(out_dir)
+        os.mkdir(out_dir)
     save(upsample(mask), original_img, blurred_img, out_dir, filename, plot)
