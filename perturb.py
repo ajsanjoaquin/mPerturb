@@ -116,7 +116,7 @@ def perturb(image, model, transforms, out_dir='/content/perturb_outputs', \
 
     prob = torch.nn.Softmax(dim=1)(model(img_tensor))
     class_idx = np.argmax(prob.cpu().data.numpy())
-    print( "Predicted class index: {}. Probability before perturbation: {}".format(class_idx, prob[0, class_idx]))
+    print(f'Predicted class index: {class_idx}. Probability before perturbation: { prob[0, class_idx]}')
 
     for i in range(max_iter):
         upsampled_mask = upsample(mask)
@@ -142,7 +142,7 @@ def perturb(image, model, transforms, out_dir='/content/perturb_outputs', \
 
         mask.data.clamp_(0, 1)
         if i% 20 == 0:
-            print('Loss: {}, Probability for target class {}, Predicted label{}'.format(loss, masked_prob, class_idx))
+            print(f'Iteration {i}/{max_iter}, Loss: {loss}, Probability for target class {masked_prob}, Predicted label{class_idx}')
     
     if not os.path.exists(out_dir):
         os.mkdir(out_dir)
