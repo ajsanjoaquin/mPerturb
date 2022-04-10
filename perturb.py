@@ -21,17 +21,20 @@ def tv_norm(input, tv_beta):
     col_grad = torch.mean(torch.abs((img[: , :-1] - img[: , 1 :])).pow(tv_beta))
     return row_grad + col_grad
 
+def postprocess(mask):
+    mask = mask.cpu().data.numpy()[0]
+    mask = np.transpose(mask, (1, 2, 0))
+
+    mask = (mask - np.min(mask)) / (np.max(mask) - np.min(mask))
+    return 1 - mask
+
 def save(mask, img, blurred, out, filename, plot=True):
     '''
     Creates, saves, and optionally, plots the images
     '''
-    mask = mask.cpu().data.numpy()[0]
-    mask = np.transpose(mask, (1, 2, 0))
-
-    mask = (mask - np.min(mask)) / np.max(mask)
-    mask = 1 - mask
+    mask = postprocess(mask)
     heatmap = cv2.applyColorMap(np.uint8(255*mask), cv2.COLORMAP_JET)
-    
+
     heatmap = np.float32(heatmap) / 255
     heatmap = cv2.cvtColor(heatmap, cv2.COLOR_BGR2RGB)
     cam = 1.0 * heatmap + np.float32(img) / 255
@@ -147,3 +150,7 @@ def perturb(image, model, transforms, out_dir='/content/perturb_outputs', \
     if not os.path.exists(out_dir):
         os.mkdir(out_dir)
     save(upsample(mask), original_img, blurred_img, out_dir, filename, plot)
+
+    # Mask can be used further, so return
+    mask = postprocess(mask)
+    return mask[:, :, 0] # squeezed mask of shape (n, m)
