@@ -83,7 +83,7 @@ def save(mask, img, blurred, out, filename, plot=True):
 def upsample(image):
     return F.interpolate(image, size=(224, 224), mode='bilinear', align_corners=False).to(device)
 
-def perturb(image, model, transforms, out_dir='/content/perturb_outputs', \
+def perturb(image, model, transforms, out_dir, \
     tv_beta=3, lr=0.2, max_iter=100, l1_coeff=0.01, tv_coeff=0.02, \
     plot=True):
     '''
@@ -105,6 +105,7 @@ def perturb(image, model, transforms, out_dir='/content/perturb_outputs', \
 
     Returns: void (calls the save function to create and save the resulting images)
     '''
+
     original_img = np.array(Image.open(image).convert('RGB').resize((224, 224)))
     filename = splitext(basename(image))[0]
 
