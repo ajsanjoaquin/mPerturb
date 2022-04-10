@@ -152,5 +152,5 @@ def perturb(image, model, transforms, out_dir='/content/perturb_outputs', \
     save(upsample(mask), original_img, blurred_img, out_dir, filename, plot)
 
     # Mask can be used further, so return
-    mask = postprocess(mask)
+    mask = postprocess(upsample(mask))
     return mask[:, :, 0] # squeezed mask of shape (n, m)
